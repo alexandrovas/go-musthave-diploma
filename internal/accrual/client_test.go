@@ -67,7 +67,7 @@ func TestGetOrderAccrual_TooManyRequests_DefaultRetryAfter(t *testing.T) {
 	_, err := client.GetOrderAccrual(context.Background(), "123")
 	var tooMany TooManyRequestsError
 	require.ErrorAs(t, err, &tooMany)
-	require.Equal(t, 60*time.Second, tooMany.RetryAfter)
+	require.Equal(t, 10*time.Second, tooMany.RetryAfter)
 }
 
 func TestGetOrderAccrual_UnexpectedStatus(t *testing.T) {

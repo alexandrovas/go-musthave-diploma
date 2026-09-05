@@ -78,7 +78,7 @@ func (c *Client) GetOrderAccrual(ctx context.Context, orderNumber string) (*Resp
 		return nil, ErrOrderNotRegistered
 
 	case http.StatusTooManyRequests:
-		retryAfter := 60 * time.Second
+		retryAfter := 10 * time.Second
 		if val := resp.Header.Get("Retry-After"); val != "" {
 			if seconds, err := strconv.Atoi(val); err == nil && seconds > 0 {
 				retryAfter = time.Duration(seconds) * time.Second
