@@ -101,8 +101,12 @@ func (s *PostgresStorage) CreateOrder(ctx context.Context, userID int64, number 
 
 	err := retry.Do(ctx, isRetriableDBError, retry.Intervals,
 		func() error {
-			const q = `INSERT INTO orders (user_id, number, status) VALUES ($1, $2, 'NEW') RETURNING number, status, accrual, uploaded_at`
-			scanErr := s.db.QueryRowContext(ctx, q, userID, number).Scan(&o.Number, &o.Status, &accrual, &uploadedAt)
+			const q = `
+				INSERT INTO orders (user_id, number, status)
+				VALUES ($1, $2, 'NEW')
+				RETURNING number, status, accrual, uploaded_at`
+			scanErr := s.db.QueryRowContext(ctx, q, userID, number).
+				Scan(&o.Number, &o.Status, &accrual, &uploadedAt)
 			if scanErr != nil {
 				return scanErr
 			}
@@ -130,8 +134,12 @@ func (s *PostgresStorage) GetOrderByNumberWithUserID(ctx context.Context, number
 
 	err := retry.Do(ctx, isRetriableDBError, retry.Intervals,
 		func() error {
-			const q = `SELECT user_id, number, status, accrual, uploaded_at FROM orders WHERE number = $1`
-			scanErr := s.db.QueryRowContext(ctx, q, number).Scan(&userID, &o.Number, &o.Status, &accrual, &uploadedAt)
+			const q = `
+				SELECT user_id, number, status, accrual, uploaded_at
+				FROM orders
+				WHERE number = $1`
+			scanErr := s.db.QueryRowContext(ctx, q, number).
+				Scan(&userID, &o.Number, &o.Status, &accrual, &uploadedAt)
 			if errors.Is(scanErr, sql.ErrNoRows) {
 				return models.ErrOrderNotFound
 			}
@@ -156,7 +164,11 @@ func (s *PostgresStorage) GetOrdersByUserID(ctx context.Context, userID int64) (
 	var orders []models.Order
 	err := retry.Do(ctx, isRetriableDBError, retry.Intervals,
 		func() error {
-			const q = `SELECT number, status, accrual, uploaded_at FROM orders WHERE user_id = $1 ORDER BY uploaded_at DESC`
+			const q = `
+				SELECT number, status, accrual, uploaded_at
+				FROM orders
+				WHERE user_id = $1
+				ORDER BY uploaded_at DESC`
 			rows, err := s.db.QueryContext(ctx, q, userID)
 			if err != nil {
 				return err
@@ -264,7 +276,11 @@ func (s *PostgresStorage) GetWithdrawalsByUserID(ctx context.Context, userID int
 	var withdrawals []models.Withdrawal
 	err := retry.Do(ctx, isRetriableDBError, retry.Intervals,
 		func() error {
-			const q = `SELECT order_number, sum, processed_at FROM withdrawals WHERE user_id = $1 ORDER BY processed_at DESC`
+			const q = `
+				SELECT order_number, sum, processed_at
+				FROM withdrawals
+				WHERE user_id = $1
+				ORDER BY processed_at DESC`
 			rows, err := s.db.QueryContext(ctx, q, userID)
 			if err != nil {
 				return err
