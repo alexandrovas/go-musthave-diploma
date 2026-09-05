@@ -13,7 +13,7 @@ func IsValid(number string) bool {
 	// Проходим справа налево, каждую вторую цифру умножаем на 2
 	for i := len(number) - 1; i >= 0; i-- {
 		digit := int(number[i] - '0')
-		if digit < 0 || digit > 9 {
+		if digit > 9 {
 			return false
 		}
 
