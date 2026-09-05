@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"crypto/tls"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -15,13 +16,25 @@ func TestUserIDFromContext_Missing(t *testing.T) {
 
 func TestSetAuthCookie(t *testing.T) {
 	rec := httptest.NewRecorder()
-	SetAuthCookie(rec, "test-token")
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	SetAuthCookie(rec, req, "test-token")
 	cookie := rec.Result().Cookies()
 	require.Len(t, cookie, 1)
 	require.Equal(t, "token", cookie[0].Name)
 	require.Equal(t, "test-token", cookie[0].Value)
 	require.True(t, cookie[0].HttpOnly)
+	require.False(t, cookie[0].Secure)
 	require.Equal(t, "/", cookie[0].Path)
+}
+
+func TestSetAuthCookie_TLS(t *testing.T) {
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.TLS = &tls.ConnectionState{}
+	SetAuthCookie(rec, req, "test-token")
+	cookie := rec.Result().Cookies()
+	require.Len(t, cookie, 1)
+	require.True(t, cookie[0].Secure)
 }
 
 func TestAuth_MissingCookie(t *testing.T) {

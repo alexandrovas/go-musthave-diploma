@@ -104,6 +104,18 @@ func (s *GophermartService) UploadOrder(ctx context.Context, userID int64, order
 	// Создаём новый заказ
 	_, err = s.repo.CreateOrder(ctx, userID, orderNumber)
 	if err != nil {
+		if errors.Is(err, models.ErrOrderAlreadyExists) {
+			// Заказ создан параллельным запросом между проверкой и вставкой —
+			// определяем фактического владельца по актуальным данным
+			_, ownerID, getErr := s.repo.GetOrderByNumberWithUserID(ctx, orderNumber)
+			if getErr != nil {
+				return UploadAccepted, getErr
+			}
+			if ownerID == userID {
+				return UploadAlreadyByUser, nil
+			}
+			return UploadAlreadyByOther, nil
+		}
 		return UploadAccepted, err
 	}
 

@@ -634,33 +634,36 @@ UPDATE orders SET status = $2, accrual = $3 WHERE number = $1
 
 #### GetBalance
 
+Используются независимые подзапросы вместо JOIN (чтобы избежать cross-product при нескольких заказах и списаниях):
+
 ```sql
 SELECT
-    COALESCE(SUM(o.accrual), 0) AS current,
-    COALESCE(SUM(w.sum), 0) AS withdrawn
-FROM users u
-LEFT JOIN orders o ON o.user_id = u.id AND o.status = 'PROCESSED'
-LEFT JOIN withdrawals w ON w.user_id = u.id
-WHERE u.id = $1
-GROUP BY u.id
+    (SELECT COALESCE(SUM(accrual), 0) FROM orders WHERE user_id = $1 AND status = 'PROCESSED'),
+    (SELECT COALESCE(SUM(sum), 0) FROM withdrawals WHERE user_id = $1)
 ```
 
-#### CreateWithdrawal (в транзакции)
+Всегда возвращает ровно одну строку (COALESCE гарантирует 0 при отсутствии данных).
+
+#### CreateWithdrawal (в транзакции с advisory lock)
 
 ```sql
 BEGIN;
+-- Advisory lock по userID для предотвращения race condition
+-- при параллельных списаниях: вторая транзакция дождётся завершения первой
+-- Снимается автоматически при COMMIT/ROLLBACK, не требует реальной строки
+SELECT pg_advisory_xact_lock($1);
 -- Проверить баланс
-SELECT COALESCE(SUM(o.accrual), 0) - COALESCE(SUM(w.sum), 0) AS available
-FROM users u
-LEFT JOIN orders o ON o.user_id = u.id AND o.status = 'PROCESSED'
-LEFT JOIN withdrawals w ON w.user_id = u.id
-WHERE u.id = $1
-GROUP BY u.id;
+SELECT
+    (SELECT COALESCE(SUM(accrual), 0) FROM orders WHERE user_id = $1 AND status = 'PROCESSED')
+    - (SELECT COALESCE(SUM(sum), 0) FROM withdrawals WHERE user_id = $1) AS available;
 -- Если available >= sum:
 INSERT INTO withdrawals (user_id, order_number, sum) VALUES ($1, $2, $3);
 COMMIT;
 ```
+
 При недостатке средств → `ErrInsufficientFunds`.
+
+**Почему advisory lock**: в `READ COMMITTED` (default) параллельные транзакции не видят незакоммиченные изменения друг друга — два tx могут одновременно увидеть `available=700` и оба разрешить списание. `pg_advisory_xact_lock` сериализует списания для одного пользователя: вторая транзакция ждёт, пока первая не завершится. Лок автоматически снимается при COMMIT/ROLLBACK и не требует реальной строки в таблице.
 
 ---
 

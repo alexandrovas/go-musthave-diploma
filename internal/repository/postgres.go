@@ -203,52 +203,15 @@ func (s *PostgresStorage) GetBalance(ctx context.Context, userID int64) (*models
 		func() error {
 			const q = `
 				SELECT
-					COALESCE(SUM(o.accrual), 0),
-					COALESCE(SUM(w.sum), 0)
-				FROM users u
-				LEFT JOIN orders o ON o.user_id = u.id AND o.status = 'PROCESSED'
-				LEFT JOIN withdrawals w ON w.user_id = u.id
-				WHERE u.id = $1
-				GROUP BY u.id`
-			scanErr := s.db.QueryRowContext(ctx, q, userID).Scan(&b.Current, &b.Withdrawn)
-			if errors.Is(scanErr, sql.ErrNoRows) {
-				// У пользователя ещё нет ни заказов, ни списаний — баланс нулевой
-				b.Current = 0
-				b.Withdrawn = 0
-				return nil
-			}
-			return scanErr
+					(SELECT COALESCE(SUM(accrual), 0) FROM orders WHERE user_id = $1 AND status = 'PROCESSED')
+					- (SELECT COALESCE(SUM(sum), 0) FROM withdrawals WHERE user_id = $1),
+					(SELECT COALESCE(SUM(sum), 0) FROM withdrawals WHERE user_id = $1)`
+			return s.db.QueryRowContext(ctx, q, userID).Scan(&b.Current, &b.Withdrawn)
 		})
 	if err != nil {
 		return nil, fmt.Errorf("get balance: %w", err)
 	}
 	return &b, nil
-}
-
-// GetAvailableBalance возвращает доступный баланс (начисления минус списания)
-func (s *PostgresStorage) GetAvailableBalance(ctx context.Context, userID int64) (float64, error) {
-	var available float64
-	err := retry.Do(ctx, isRetriableDBError, retry.Intervals,
-		func() error {
-			const q = `
-				SELECT
-					COALESCE(SUM(o.accrual), 0) - COALESCE(SUM(w.sum), 0)
-				FROM users u
-				LEFT JOIN orders o ON o.user_id = u.id AND o.status = 'PROCESSED'
-				LEFT JOIN withdrawals w ON w.user_id = u.id
-				WHERE u.id = $1
-				GROUP BY u.id`
-			scanErr := s.db.QueryRowContext(ctx, q, userID).Scan(&available)
-			if errors.Is(scanErr, sql.ErrNoRows) {
-				available = 0
-				return nil
-			}
-			return scanErr
-		})
-	if err != nil {
-		return 0, fmt.Errorf("get available balance: %w", err)
-	}
-	return available, nil
 }
 
 // CreateWithdrawal создаёт списание в рамках транзакции с проверкой баланса
@@ -261,23 +224,22 @@ func (s *PostgresStorage) CreateWithdrawal(ctx context.Context, userID int64, or
 			}
 			defer tx.Rollback()
 
+			// Advisory lock для предотвращения race condition
+			// при параллельных списаниях одного пользователя
+			const lockQ = `SELECT pg_advisory_xact_lock($1)`
+			if _, err := tx.ExecContext(ctx, lockQ, userID); err != nil {
+				return fmt.Errorf("acquire advisory lock: %w", err)
+			}
+
 			// Проверка доступного баланса в рамках транзакции
 			var available float64
 			const balanceQ = `
 				SELECT
-					COALESCE(SUM(o.accrual), 0) - COALESCE(SUM(w.sum), 0)
-				FROM users u
-				LEFT JOIN orders o ON o.user_id = u.id AND o.status = 'PROCESSED'
-				LEFT JOIN withdrawals w ON w.user_id = u.id
-				WHERE u.id = $1
-				GROUP BY u.id`
+					(SELECT COALESCE(SUM(accrual), 0) FROM orders WHERE user_id = $1 AND status = 'PROCESSED')
+					- (SELECT COALESCE(SUM(sum), 0) FROM withdrawals WHERE user_id = $1)`
 			scanErr := tx.QueryRowContext(ctx, balanceQ, userID).Scan(&available)
 			if scanErr != nil {
-				if errors.Is(scanErr, sql.ErrNoRows) {
-					available = 0
-				} else {
-					return fmt.Errorf("check balance: %w", scanErr)
-				}
+				return fmt.Errorf("check balance: %w", scanErr)
 			}
 
 			if available < sum {

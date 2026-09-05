@@ -37,13 +37,16 @@ func UserIDFromContext(ctx context.Context) (int64, bool) {
 	return id, ok
 }
 
-// SetAuthCookie устанавливает cookie с JWT-токеном в ответ
-func SetAuthCookie(w http.ResponseWriter, token string) {
+// SetAuthCookie устанавливает cookie с JWT-токеном в ответ.
+// Secure выставляется только для запросов по HTTPS, чтобы не сломать
+// работу сервиса при развёртывании по обычному HTTP
+func SetAuthCookie(w http.ResponseWriter, r *http.Request, token string) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     "token",
 		Value:    token,
 		Path:     "/",
 		HttpOnly: true,
+		Secure:   r.TLS != nil,
 		SameSite: http.SameSiteLaxMode,
 	})
 }

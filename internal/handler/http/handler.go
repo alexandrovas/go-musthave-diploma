@@ -81,7 +81,7 @@ func (h *Handler) RegisterUser(w http.ResponseWriter, r *http.Request) {
 		h.writeJSON(w, models.ErrorResponse{Error: errInternal.Error()}, http.StatusInternalServerError)
 		return
 	}
-	middleware.SetAuthCookie(w, token)
+	middleware.SetAuthCookie(w, r, token)
 
 	w.WriteHeader(http.StatusOK)
 }
@@ -117,7 +117,7 @@ func (h *Handler) LoginUser(w http.ResponseWriter, r *http.Request) {
 		h.writeJSON(w, models.ErrorResponse{Error: errInternal.Error()}, http.StatusInternalServerError)
 		return
 	}
-	middleware.SetAuthCookie(w, token)
+	middleware.SetAuthCookie(w, r, token)
 
 	w.WriteHeader(http.StatusOK)
 }
