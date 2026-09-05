@@ -9,12 +9,12 @@ import (
 )
 
 const (
-	contentEncodingHeader  = "Content-Encoding"
-	acceptEncodingHeader   = "Accept-Encoding"
-	acceptEncodingGzip     = "gzip"
-	contentTypeHeader      = "Content-Type"
-	contentTypeApplicationJson = "application/json"
-	contentTypeTextHtml        = "text/html"
+	contentEncodingHeader      = "Content-Encoding"
+	acceptEncodingHeader       = "Accept-Encoding"
+	acceptEncodingGzip         = "gzip"
+	contentTypeHeader          = "Content-Type"
+	contentTypeApplicationJSON = "application/json"
+	contentTypeTextHTML        = "text/html"
 )
 
 // compressWriter реализует http.ResponseWriter и позволяет прозрачно
@@ -101,8 +101,8 @@ func (c *compressReader) Close() error {
 // allowToCompress проверяет, нужно ли сжимать ответ с данным Content-Type
 func allowToCompress(contentType string) bool {
 	allowed := []string{
-		contentTypeApplicationJson,
-		contentTypeTextHtml,
+		contentTypeApplicationJSON,
+		contentTypeTextHTML,
 	}
 	return slices.Contains(allowed, contentType)
 }

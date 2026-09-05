@@ -18,7 +18,7 @@ import (
 type LogFormat string
 
 const (
-	JsonLogFormat LogFormat = "json"
+	JSONLogFormat LogFormat = "json"
 	TextLogFormat LogFormat = "text"
 )
 
