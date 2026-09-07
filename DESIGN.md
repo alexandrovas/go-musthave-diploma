@@ -176,11 +176,13 @@ CREATE TABLE IF NOT EXISTS users (
     password TEXT    NOT NULL
 );
 
+CREATE TYPE order_status AS ENUM ('NEW', 'PROCESSING', 'INVALID', 'PROCESSED');
+
 CREATE TABLE IF NOT EXISTS orders (
     id         BIGSERIAL PRIMARY KEY,
     user_id    BIGINT      NOT NULL REFERENCES users(id),
     number     TEXT        NOT NULL UNIQUE,
-    status     TEXT        NOT NULL DEFAULT 'NEW',
+    status     order_status NOT NULL DEFAULT 'NEW',
     accrual    NUMERIC(20,2),
     uploaded_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -202,7 +204,7 @@ CREATE INDEX idx_withdrawals_user_id ON withdrawals(user_id);
 **Обоснование типов**:
 - `password` — хранится как bcrypt-хеш (TEXT).
 - `number` — номер заказа, строка цифр произвольной длины (TEXT).
-- `status` — текстовый статус: `NEW`, `PROCESSING`, `INVALID`, `PROCESSED`.
+- `status` — ENUM `order_status` (`NEW`, `PROCESSING`, `INVALID`, `PROCESSED`) — фиксированный набор значений, СУБД гарантирует, что в колонку не попадёт ничего постороннего (в отличие от TEXT + CHECK, ещё и компактнее хранится).
 - `accrual` — NUMERIC для точного хранения денежных значений; `NULL` пока начисление неизвестно.
 - `uploaded_at`, `processed_at` — `TIMESTAMPTZ` для RFC3339-совместимого вывода.
 - Частичный индекс `idx_orders_status_new_processing` — для эффективного выбора заказов, которые воркер должен отправлять в accrual.
@@ -614,6 +616,7 @@ INSERT INTO orders (user_id, number, status) VALUES ($1, $2, 'NEW') RETURNING nu
 SELECT o.id, o.number, o.status, o.accrual, o.uploaded_at, o.user_id
 FROM orders o WHERE o.number = $1
 ```
+
 Возвращает заказ и `user_id` владельца. Если не найден → `ErrOrderNotFound`.
 
 #### GetOrdersForProcessing
