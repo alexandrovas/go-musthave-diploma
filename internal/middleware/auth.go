@@ -7,7 +7,7 @@ import (
 
 type contextKey string
 
-const ContextKeyUserID contextKey = "userID"
+const contextKeyUserID contextKey = "userID"
 
 // Auth возвращает middleware, проверяющее JWT-токен из cookie и извлекающее userID
 func Auth(secret string) func(http.Handler) http.Handler {
@@ -25,7 +25,7 @@ func Auth(secret string) func(http.Handler) http.Handler {
 				return
 			}
 
-			ctx := context.WithValue(r.Context(), ContextKeyUserID, userID)
+			ctx := context.WithValue(r.Context(), contextKeyUserID, userID)
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
@@ -33,7 +33,7 @@ func Auth(secret string) func(http.Handler) http.Handler {
 
 // UserIDFromContext извлекает userID из контекста запроса
 func UserIDFromContext(ctx context.Context) (int64, bool) {
-	id, ok := ctx.Value(ContextKeyUserID).(int64)
+	id, ok := ctx.Value(contextKeyUserID).(int64)
 	return id, ok
 }
 

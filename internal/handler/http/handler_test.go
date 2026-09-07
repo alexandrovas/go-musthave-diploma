@@ -51,11 +51,22 @@ func (m *mockService) GetWithdrawals(ctx context.Context, userID int64) ([]model
 	return m.getWithdrawalsFn(ctx, userID)
 }
 
+const testJWTSecret = "test-secret"
+
 func withAuth(userID int64) func(r *http.Request) {
 	return func(r *http.Request) {
-		ctx := context.WithValue(r.Context(), middleware.ContextKeyUserID, userID)
-		*r = *r.WithContext(ctx)
+		token, err := middleware.BuildToken(userID, testJWTSecret)
+		if err != nil {
+			panic(err)
+		}
+		r.AddCookie(&http.Cookie{Name: "token", Value: token})
 	}
+}
+
+// serveAuthed прогоняет запрос через настоящий middleware.Auth перед вызовом хендлера,
+// чтобы тесты не зависели от способа, которым middleware помещает userID в контекст
+func serveAuthed(next http.HandlerFunc, w http.ResponseWriter, r *http.Request) {
+	middleware.Auth(testJWTSecret)(next).ServeHTTP(w, r)
 }
 
 func TestRegisterUser_Success(t *testing.T) {
@@ -147,7 +158,7 @@ func TestUploadOrder_Accepted(t *testing.T) {
 	req.Header.Set("Content-Type", "text/plain")
 	withAuth(1)(req)
 	rec := httptest.NewRecorder()
-	h.UploadOrder(rec, req)
+	serveAuthed(h.UploadOrder, rec, req)
 	require.Equal(t, http.StatusAccepted, rec.Code)
 }
 
@@ -162,7 +173,7 @@ func TestUploadOrder_AlreadyByUser(t *testing.T) {
 	req.Header.Set("Content-Type", "text/plain")
 	withAuth(1)(req)
 	rec := httptest.NewRecorder()
-	h.UploadOrder(rec, req)
+	serveAuthed(h.UploadOrder, rec, req)
 	require.Equal(t, http.StatusOK, rec.Code)
 }
 
@@ -177,7 +188,7 @@ func TestUploadOrder_AlreadyByOther(t *testing.T) {
 	req.Header.Set("Content-Type", "text/plain")
 	withAuth(1)(req)
 	rec := httptest.NewRecorder()
-	h.UploadOrder(rec, req)
+	serveAuthed(h.UploadOrder, rec, req)
 	require.Equal(t, http.StatusConflict, rec.Code)
 }
 
@@ -187,7 +198,7 @@ func TestUploadOrder_InvalidLuhn(t *testing.T) {
 	req.Header.Set("Content-Type", "text/plain")
 	withAuth(1)(req)
 	rec := httptest.NewRecorder()
-	h.UploadOrder(rec, req)
+	serveAuthed(h.UploadOrder, rec, req)
 	require.Equal(t, http.StatusUnprocessableEntity, rec.Code)
 }
 
@@ -209,7 +220,7 @@ func TestGetOrders_Success(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/user/orders", nil)
 	withAuth(1)(req)
 	rec := httptest.NewRecorder()
-	h.GetOrders(rec, req)
+	serveAuthed(h.GetOrders, rec, req)
 	require.Equal(t, http.StatusOK, rec.Code)
 }
 
@@ -223,7 +234,7 @@ func TestGetOrders_NoContent(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/user/orders", nil)
 	withAuth(1)(req)
 	rec := httptest.NewRecorder()
-	h.GetOrders(rec, req)
+	serveAuthed(h.GetOrders, rec, req)
 	require.Equal(t, http.StatusNoContent, rec.Code)
 }
 
@@ -237,7 +248,7 @@ func TestGetBalance_Success(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/user/balance", nil)
 	withAuth(1)(req)
 	rec := httptest.NewRecorder()
-	h.GetBalance(rec, req)
+	serveAuthed(h.GetBalance, rec, req)
 	require.Equal(t, http.StatusOK, rec.Code)
 	var bal models.Balance
 	require.NoError(t, json.NewDecoder(rec.Body).Decode(&bal))
@@ -257,7 +268,7 @@ func TestWithdrawBalance_Success(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	withAuth(1)(req)
 	rec := httptest.NewRecorder()
-	h.WithdrawBalance(rec, req)
+	serveAuthed(h.WithdrawBalance, rec, req)
 	require.Equal(t, http.StatusOK, rec.Code)
 }
 
@@ -273,7 +284,7 @@ func TestWithdrawBalance_InsufficientFunds(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	withAuth(1)(req)
 	rec := httptest.NewRecorder()
-	h.WithdrawBalance(rec, req)
+	serveAuthed(h.WithdrawBalance, rec, req)
 	require.Equal(t, http.StatusPaymentRequired, rec.Code)
 }
 
@@ -284,7 +295,7 @@ func TestWithdrawBalance_InvalidLuhn(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	withAuth(1)(req)
 	rec := httptest.NewRecorder()
-	h.WithdrawBalance(rec, req)
+	serveAuthed(h.WithdrawBalance, rec, req)
 	require.Equal(t, http.StatusUnprocessableEntity, rec.Code)
 }
 
@@ -298,7 +309,7 @@ func TestGetWithdrawals_Success(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/user/withdrawals", nil)
 	withAuth(1)(req)
 	rec := httptest.NewRecorder()
-	h.GetWithdrawals(rec, req)
+	serveAuthed(h.GetWithdrawals, rec, req)
 	require.Equal(t, http.StatusOK, rec.Code)
 }
 
@@ -312,6 +323,6 @@ func TestGetWithdrawals_NoContent(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/user/withdrawals", nil)
 	withAuth(1)(req)
 	rec := httptest.NewRecorder()
-	h.GetWithdrawals(rec, req)
+	serveAuthed(h.GetWithdrawals, rec, req)
 	require.Equal(t, http.StatusNoContent, rec.Code)
 }

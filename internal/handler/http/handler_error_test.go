@@ -82,7 +82,7 @@ func TestUploadOrder_EmptyBody(t *testing.T) {
 	req.Header.Set("Content-Type", "text/plain")
 	withAuth(1)(req)
 	rec := httptest.NewRecorder()
-	h.UploadOrder(rec, req)
+	serveAuthed(h.UploadOrder, rec, req)
 	require.Equal(t, http.StatusBadRequest, rec.Code)
 }
 
@@ -97,7 +97,7 @@ func TestUploadOrder_InternalError(t *testing.T) {
 	req.Header.Set("Content-Type", "text/plain")
 	withAuth(1)(req)
 	rec := httptest.NewRecorder()
-	h.UploadOrder(rec, req)
+	serveAuthed(h.UploadOrder, rec, req)
 	require.Equal(t, http.StatusInternalServerError, rec.Code)
 }
 
@@ -112,7 +112,7 @@ func TestUploadOrder_OrderAlreadyExists(t *testing.T) {
 	req.Header.Set("Content-Type", "text/plain")
 	withAuth(1)(req)
 	rec := httptest.NewRecorder()
-	h.UploadOrder(rec, req)
+	serveAuthed(h.UploadOrder, rec, req)
 	require.Equal(t, http.StatusConflict, rec.Code)
 }
 
@@ -126,7 +126,7 @@ func TestGetOrders_InternalError(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/user/orders", nil)
 	withAuth(1)(req)
 	rec := httptest.NewRecorder()
-	h.GetOrders(rec, req)
+	serveAuthed(h.GetOrders, rec, req)
 	require.Equal(t, http.StatusInternalServerError, rec.Code)
 }
 
@@ -140,7 +140,7 @@ func TestGetBalance_InternalError(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/user/balance", nil)
 	withAuth(1)(req)
 	rec := httptest.NewRecorder()
-	h.GetBalance(rec, req)
+	serveAuthed(h.GetBalance, rec, req)
 	require.Equal(t, http.StatusInternalServerError, rec.Code)
 }
 
@@ -150,7 +150,7 @@ func TestWithdrawBalance_InvalidBody(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	withAuth(1)(req)
 	rec := httptest.NewRecorder()
-	h.WithdrawBalance(rec, req)
+	serveAuthed(h.WithdrawBalance, rec, req)
 	require.Equal(t, http.StatusBadRequest, rec.Code)
 }
 
@@ -163,7 +163,7 @@ func TestWithdrawBalance_EmptyOrderOrZeroSum(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	withAuth(1)(req)
 	rec := httptest.NewRecorder()
-	h.WithdrawBalance(rec, req)
+	serveAuthed(h.WithdrawBalance, rec, req)
 	require.Equal(t, http.StatusBadRequest, rec.Code)
 
 	// Zero sum
@@ -172,7 +172,7 @@ func TestWithdrawBalance_EmptyOrderOrZeroSum(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	withAuth(1)(req)
 	rec = httptest.NewRecorder()
-	h.WithdrawBalance(rec, req)
+	serveAuthed(h.WithdrawBalance, rec, req)
 	require.Equal(t, http.StatusBadRequest, rec.Code)
 }
 
@@ -188,7 +188,7 @@ func TestWithdrawBalance_InternalError(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	withAuth(1)(req)
 	rec := httptest.NewRecorder()
-	h.WithdrawBalance(rec, req)
+	serveAuthed(h.WithdrawBalance, rec, req)
 	require.Equal(t, http.StatusInternalServerError, rec.Code)
 }
 
@@ -202,7 +202,7 @@ func TestGetWithdrawals_InternalError(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/user/withdrawals", nil)
 	withAuth(1)(req)
 	rec := httptest.NewRecorder()
-	h.GetWithdrawals(rec, req)
+	serveAuthed(h.GetWithdrawals, rec, req)
 	require.Equal(t, http.StatusInternalServerError, rec.Code)
 }
 
