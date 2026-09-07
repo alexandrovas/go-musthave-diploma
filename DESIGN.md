@@ -709,7 +709,11 @@ func (a *App) Run() error {
     server := &http.Server{Addr: a.cfg.RunAddress, Handler: router}
 
     // 6. Воркер обработки заказов
-    go a.processOrders(ctx, repo, accrualClient)
+    var wg sync.WaitGroup
+    wg.Go(func() {
+        a.processOrders(ctx, repo, accrualClient)
+    })
+    defer wg.Wait()
 
     // 7. Graceful shutdown
     go func() {

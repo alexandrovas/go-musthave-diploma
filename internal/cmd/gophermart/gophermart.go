@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"sync"
 	"time"
 
 	"github.com/alexandrovas/go-musthave-diploma/internal/accrual"
@@ -59,8 +60,13 @@ func (a *App) Run() error {
 		Handler: router,
 	}
 
-	// Воркер обработки заказов
-	go a.processOrders(ctx, repo, accrualClient)
+	// Воркер обработки заказов. WaitGroup гарантирует, что воркер завершится
+	// до defer repo.Close()
+	var wg sync.WaitGroup
+	wg.Go(func() {
+		a.processOrders(ctx, repo, accrualClient)
+	})
+	defer wg.Wait()
 
 	// Graceful shutdown: при получении сигнала прерывания завершаем сервер
 	go func() {
