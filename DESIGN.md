@@ -543,10 +543,11 @@ type ServerError struct {
 
 **Алгоритм**:
 
-1. Периодически (каждые 5с) выбирать заказы в статусе `NEW` или `PROCESSING` из БД (`repo.GetOrdersForProcessing`).
-2. Для каждого заказа:
+1. Периодически (каждые 10с) выбирать до 10 заказов в статусе `NEW` или `PROCESSING` из БД (`repo.GetOrdersForProcessing`).
+2. Заказы батча обрабатываются **параллельно** — по горутине на заказ (`processBatch` / `processOrder`), а не последовательно. При последовательной обработке таймаут HTTP-клиента 10с и батч из 10 заказов могли растянуть один тик до 100с — намного дольше интервала воркера (10с); параллельная обработка ограничивает время тика временем одного самого медленного запроса.
+3. Для каждого заказа (`processOrder`):
    a. Запросить accrual-клиент: `accrualClient.GetOrderAccrual(ctx, order.Number)`.
-   b. При `TooManyRequestsError` — выдержать паузу из `RetryAfter` и прервать текущую итерацию.
+   b. При `TooManyRequestsError` — не прерывать остальные уже запущенные горутины (они всё равно почти все в процессе или уже завершились), а отправить `RetryAfter` в буферизованный канал `rateLimitCh` для агрегации.
    c. При `ErrOrderNotRegistered` (204) — пропустить, статус остаётся `NEW`; штатная ситуация, логируется на уровне Debug (не Error), чтобы не засорять лог.
    d. Маппинг статусов accrual → gophermart:
       - `REGISTERED` → `NEW` (оставляем как есть)
@@ -554,9 +555,10 @@ type ServerError struct {
       - `INVALID` → `INVALID` (с `accrual = nil`)
       - `PROCESSED` → `PROCESSED` (с accrual из ответа)
    e. Обновить заказ в БД: `repo.UpdateOrderStatus(ctx, number, newStatus, accrual)`.
-3. Воркер работает в отдельной горутине, завершается по `ctx.Done()`.
+4. `processBatch` дожидается завершения всех горутин батча (`sync.WaitGroup`), затем берёт максимальное значение `Retry-After` из `rateLimitCh` (если хотя бы одна горутина получила 429) — это значение возвращается наверх и используется для паузы перед следующим тиком.
+5. Воркер работает в отдельной горутине, завершается по `ctx.Done()`.
 
-**Обработка 429**: при получении 429 от accrual-сервиса воркер выдерживает паузу `Retry-After` (по умолчанию 60с) перед следующей попыткой. Это предотвращает превышение лимита запросов.
+**Обработка 429**: при получении 429 хотя бы от одного заказа батча воркер выдерживает паузу `Retry-After` (по умолчанию 60с, берётся максимум среди всех сработавших горутин) перед следующим тиком. Это предотвращает превышение лимита запросов.
 
 ---
 
@@ -733,11 +735,11 @@ func (a *App) Run() error {
 }
 ```
 
-### processOrders — цикл воркера
+### processOrders / processBatch / processOrder — цикл воркера
 
 ```go
 func (a *App) processOrders(ctx context.Context, repo *repository.PostgresStorage, client *accrual.Client) {
-    ticker := time.NewTicker(5 * time.Second)
+    ticker := time.NewTicker(10 * time.Second)
     defer ticker.Stop()
     var retryAfter time.Duration
 
@@ -762,26 +764,53 @@ func (a *App) processOrders(ctx context.Context, repo *repository.PostgresStorag
         if err != nil {
             continue
         }
-
-        for _, order := range orders {
-            resp, err := client.GetOrderAccrual(ctx, order.Number)
-            if err != nil {
-                if tooManyReq, ok := errors.AsType[accrual.TooManyRequestsError](err); ok {
-                    retryAfter = tooManyReq.RetryAfter
-                    break // прервать итерацию
-                }
-                if errors.Is(err, accrual.ErrOrderNotRegistered) {
-                    // штатная ситуация: заказ ещё не принят accrual в обработку
-                    continue
-                }
-                continue
-            }
-
-            newStatus, accrual := mapAccrualStatus(resp)
-            if newStatus != "" {
-                repo.UpdateOrderStatus(ctx, order.Number, newStatus, accrual)
-            }
+        if len(orders) == 0 {
+            continue
         }
+
+        retryAfter = a.processBatch(ctx, repo, client, orders)
+    }
+}
+
+// Заказы батча обрабатываются параллельно — по горутине на заказ
+func (a *App) processBatch(ctx context.Context, repo *repository.PostgresStorage, client *accrual.Client, orders []models.Order) time.Duration {
+    rateLimitCh := make(chan time.Duration, len(orders))
+
+    var wg sync.WaitGroup
+    for _, order := range orders {
+        wg.Go(func() {
+            a.processOrder(ctx, repo, client, order, rateLimitCh)
+        })
+    }
+    wg.Wait()
+    close(rateLimitCh)
+
+    var retryAfter time.Duration
+    for d := range rateLimitCh {
+        if d > retryAfter {
+            retryAfter = d
+        }
+    }
+    return retryAfter
+}
+
+func (a *App) processOrder(ctx context.Context, repo *repository.PostgresStorage, client *accrual.Client, order models.Order, rateLimitCh chan<- time.Duration) {
+    resp, err := client.GetOrderAccrual(ctx, order.Number)
+    if err != nil {
+        if tooManyReq, ok := errors.AsType[accrual.TooManyRequestsError](err); ok {
+            rateLimitCh <- tooManyReq.RetryAfter
+            return
+        }
+        if errors.Is(err, accrual.ErrOrderNotRegistered) {
+            // штатная ситуация: заказ ещё не принят accrual в обработку
+            return
+        }
+        return
+    }
+
+    newStatus, accrualAmount := mapAccrualStatus(resp)
+    if newStatus != "" {
+        repo.UpdateOrderStatus(ctx, order.Number, newStatus, accrualAmount)
     }
 }
 ```

@@ -91,7 +91,10 @@ func (a *App) Run() error {
 // processOrders — фоновый воркер, периодически опрашивающий accrual-сервис
 // для обновления статусов заказов
 func (a *App) processOrders(ctx context.Context, repo *repository.PostgresStorage, client *accrual.Client) {
-	const tickInterval = 5 * time.Second
+	const (
+		tickInterval = 10 * time.Second
+		batchSize    = 10
+	)
 	ticker := time.NewTicker(tickInterval)
 	defer ticker.Stop()
 
@@ -116,7 +119,7 @@ func (a *App) processOrders(ctx context.Context, repo *repository.PostgresStorag
 		}
 
 		// Получаем заказы для обработки
-		orders, err := repo.GetOrdersForProcessing(ctx, 10)
+		orders, err := repo.GetOrdersForProcessing(ctx, batchSize)
 		if err != nil {
 			a.logger.Error("failed to get orders for processing", "error", err)
 			continue
@@ -126,30 +129,63 @@ func (a *App) processOrders(ctx context.Context, repo *repository.PostgresStorag
 			continue
 		}
 
-		// Обрабатываем каждый заказ
-		for _, order := range orders {
-			resp, err := client.GetOrderAccrual(ctx, order.Number)
-			if err != nil {
-				if tooManyReq, ok := errors.AsType[*accrual.TooManyRequestsError](err); ok {
-					retryAfter = tooManyReq.RetryAfter
-					a.logger.Warn("accrual rate limit hit", "retry_after", retryAfter)
-					break // прервать итерацию
-				}
-				if errors.Is(err, accrual.ErrOrderNotRegistered) {
-					a.logger.Debug("order not yet registered in accrual", "order", order.Number)
-					continue
-				}
-				a.logger.Error("accrual request failed", "order", order.Number, "error", err)
-				continue
-			}
+		retryAfter = a.processBatch(ctx, repo, client, orders)
+	}
+}
 
-			// Маппинг статусов accrual → gophermart
-			newStatus, accrual := mapAccrualStatus(resp)
-			if newStatus != "" {
-				if err := repo.UpdateOrderStatus(ctx, order.Number, newStatus, accrual); err != nil {
-					a.logger.Error("failed to update order status", "order", order.Number, "error", err)
-				}
-			}
+// processBatch обрабатывает заказы батча параллельно — по горутине на заказ,
+// вместо последовательных запросов. Это устраняет риск того, что при таймауте
+// HTTP-клиента 10с и батче из 10 заказов один тик обработки растянется до
+// 100с, что намного дольше интервала воркера (10с)
+func (a *App) processBatch(ctx context.Context, repo *repository.PostgresStorage, client *accrual.Client, orders []models.Order) time.Duration {
+	rateLimitCh := make(chan time.Duration, len(orders))
+
+	var wg sync.WaitGroup
+	for _, order := range orders {
+		wg.Go(func() {
+			a.processOrder(ctx, repo, client, order, rateLimitCh)
+		})
+	}
+	wg.Wait()
+	close(rateLimitCh)
+
+	// Если хотя бы один запрос получает 429 Too Many Requests, остальные уже
+	// запущенные горутины не прерываются (они и так почти все в процессе или уже
+	// завершились к этому моменту) — вместо этого возвращается наибольшее из
+	// полученных значений Retry-After, чтобы выдержать паузу перед следующим тиком
+	var retryAfter time.Duration
+	for d := range rateLimitCh {
+		if d > retryAfter {
+			retryAfter = d
+		}
+	}
+	return retryAfter
+}
+
+// processOrder запрашивает начисление по одному заказу и обновляет его статус.
+// При 429 значение Retry-After отправляется в rateLimitCh для агрегации в processBatch
+func (a *App) processOrder(ctx context.Context, repo *repository.PostgresStorage, client *accrual.Client,
+	order models.Order, rateLimitCh chan<- time.Duration) {
+	resp, err := client.GetOrderAccrual(ctx, order.Number)
+	if err != nil {
+		if tooManyReq, ok := errors.AsType[accrual.TooManyRequestsError](err); ok {
+			a.logger.Warn("accrual rate limit hit", "retry_after", tooManyReq.RetryAfter)
+			rateLimitCh <- tooManyReq.RetryAfter
+			return
+		}
+		if errors.Is(err, accrual.ErrOrderNotRegistered) {
+			a.logger.Debug("order not yet registered in accrual", "order", order.Number)
+			return
+		}
+		a.logger.Error("accrual request failed", "order", order.Number, "error", err)
+		return
+	}
+
+	// Маппинг статусов accrual → gophermart
+	newStatus, accrualAmount := mapAccrualStatus(resp)
+	if newStatus != "" {
+		if err := repo.UpdateOrderStatus(ctx, order.Number, newStatus, accrualAmount); err != nil {
+			a.logger.Error("failed to update order status", "order", order.Number, "error", err)
 		}
 	}
 }
