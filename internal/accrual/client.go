@@ -77,15 +77,35 @@ func (c *Client) GetOrderAccrual(ctx context.Context, orderNumber string) (*Resp
 		return nil, ErrOrderNotRegistered
 
 	case http.StatusTooManyRequests:
-		retryAfter := 10 * time.Second
-		if val := resp.Header.Get("Retry-After"); val != "" {
-			if seconds, err := strconv.Atoi(val); err == nil && seconds > 0 {
-				retryAfter = time.Duration(seconds) * time.Second
-			}
+		return nil, TooManyRequestsError{
+			RetryAfter: c.getRetryAfter(resp),
 		}
-		return nil, TooManyRequestsError{RetryAfter: retryAfter}
 
 	default:
 		return nil, fmt.Errorf("unexpected status code from accrual: %d", resp.StatusCode)
 	}
+}
+
+// getRetryAfter вычисляет time.Duration из заголовка Retry-After.
+// Если пришло невалидное значение или заголовок отсутствует, то возвращет 10s как fallback
+func (c *Client) getRetryAfter(resp *http.Response) time.Duration {
+	const (
+		headerName = "Retry-After"
+		fallback   = 10 * time.Second
+	)
+
+	logWrongHeader := func(val string) {
+		msg := fmt.Sprintf("wrong value in response header %s, use default value %s as fallback", headerName, fallback)
+		c.logger.Warn(msg, "value", val)
+	}
+
+	val := resp.Header.Get(headerName)
+	if val != "" {
+		if seconds, err := strconv.Atoi(val); err == nil && seconds > 0 {
+			return time.Duration(seconds) * time.Second
+		}
+	}
+
+	logWrongHeader(val)
+	return fallback
 }
