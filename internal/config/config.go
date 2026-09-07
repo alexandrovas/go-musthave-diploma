@@ -37,8 +37,8 @@ type Config struct {
 	Log                  LogConfig `koanf:"log"`
 }
 
-// LoadConfig загружает конфигурацию из файла, флагов CLI и переменных окружения
-// Приоритет: файл < флаги < переменные окружения
+// LoadConfig загружает конфигурацию из файла, переменных окружения и флагов CLI
+// Приоритет: файл < переменные окружения < флаги
 func LoadConfig(configPath string, flags *pflag.FlagSet) (*Config, error) {
 	k := koanf.New(".")
 
@@ -50,11 +50,6 @@ func LoadConfig(configPath string, flags *pflag.FlagSet) (*Config, error) {
 		}
 	}
 
-	// Загрузка из CLI-флагов
-	if err := k.Load(posflag.Provider(flags, ".", k), nil); err != nil {
-		return nil, fmt.Errorf("load config from flags: %w", err)
-	}
-
 	// Загрузка из переменных окружения
 	// Двойной underscore как разделитель вложенности, нижний регистр: RUN_ADDRESS → run.address
 	if err := k.Load(env.Provider(".", env.Opt{
@@ -64,6 +59,14 @@ func LoadConfig(configPath string, flags *pflag.FlagSet) (*Config, error) {
 		},
 	}), nil); err != nil {
 		return nil, fmt.Errorf("load config from env: %w", err)
+	}
+
+	// Загрузка из CLI-флагов последней: posflag.Provider учитывает уже
+	// загруженные в k значения (из файла и env) и подставляет значение флага
+	// по умолчанию, только если ключ ещё не задан; явно переданные флаги
+	// (f.Changed) перекрывают файл и env в любом случае
+	if err := k.Load(posflag.Provider(flags, ".", k), nil); err != nil {
+		return nil, fmt.Errorf("load config from flags: %w", err)
 	}
 
 	var cfg Config
