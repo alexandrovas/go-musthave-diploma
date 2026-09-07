@@ -3,6 +3,7 @@ package accrual
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -28,9 +29,7 @@ func (e TooManyRequestsError) Error() string {
 
 var (
 	// ErrOrderNotRegistered — заказ не зарегистрирован в accrual-системе
-	ErrOrderNotRegistered = fmt.Errorf("order not registered in accrual system")
-	// ErrTooManyRequests — превышен лимит запросов к accrual-системе
-	ErrTooManyRequests = fmt.Errorf("too many requests to accrual system")
+	ErrOrderNotRegistered = errors.New("order not registered in accrual system")
 )
 
 // Client — HTTP-клиент для accrual-сервиса
