@@ -172,8 +172,8 @@ func main() {
 
 CREATE TABLE IF NOT EXISTS users (
     id       BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    login    TEXT    NOT NULL UNIQUE,
-    password TEXT    NOT NULL
+    login    VARCHAR(32) NOT NULL UNIQUE,
+    password VARCHAR(72) NOT NULL
 );
 
 CREATE TYPE order_status AS ENUM ('NEW', 'PROCESSING', 'INVALID', 'PROCESSED');
@@ -181,7 +181,7 @@ CREATE TYPE order_status AS ENUM ('NEW', 'PROCESSING', 'INVALID', 'PROCESSED');
 CREATE TABLE IF NOT EXISTS orders (
     id         BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     user_id    BIGINT      NOT NULL REFERENCES users(id),
-    number     TEXT        NOT NULL UNIQUE,
+    number     VARCHAR(32) NOT NULL UNIQUE,
     status     order_status NOT NULL DEFAULT 'NEW',
     accrual    NUMERIC(20,2),
     uploaded_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -193,7 +193,7 @@ CREATE INDEX idx_orders_status_new_processing ON orders(status) WHERE status IN 
 CREATE TABLE IF NOT EXISTS withdrawals (
     id           BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     user_id      BIGINT       NOT NULL REFERENCES users(id),
-    order_number TEXT         NOT NULL,
+    order_number VARCHAR(32)  NOT NULL,
     sum          NUMERIC(20,2) NOT NULL,
     processed_at TIMESTAMPTZ  NOT NULL DEFAULT NOW()
 );
@@ -202,8 +202,9 @@ CREATE INDEX idx_withdrawals_user_id ON withdrawals(user_id);
 ```
 
 **Обоснование типов**:
-- `password` — хранится как bcrypt-хеш (TEXT).
-- `number` — номер заказа, строка цифр произвольной длины (TEXT).
+- `login` — `VARCHAR(32)`: разумный лимит для читаемого логина.
+- `password` — хранится как bcrypt-хеш; лимит `VARCHAR(72)` соответствует максимальной длине пароля, которую учитывает bcrypt (72 байта), с запасом на смену алгоритма хеширования в будущем.
+- `number`, `order_number` — номер заказа, строка цифр, проверяется алгоритмом Луна; `VARCHAR(32)` — с запасом относительно реальных номеров карт (до 19 цифр).
 - `status` — ENUM `order_status` (`NEW`, `PROCESSING`, `INVALID`, `PROCESSED`) — фиксированный набор значений, СУБД гарантирует, что в колонку не попадёт ничего постороннего (в отличие от TEXT + CHECK, ещё и компактнее хранится).
 - `accrual` — NUMERIC для точного хранения денежных значений; `NULL` пока начисление неизвестно.
 - `uploaded_at`, `processed_at` — `TIMESTAMPTZ` для RFC3339-совместимого вывода.
