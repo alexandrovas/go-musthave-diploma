@@ -638,20 +638,20 @@ UPDATE orders SET status = $2, accrual = $3 WHERE number = $1
 
 ```sql
 SELECT
-    (SELECT COALESCE(SUM(accrual), 0) FROM orders WHERE user_id = $1 AND status = 'PROCESSED'),
+    (SELECT COALESCE(SUM(accrual), 0) FROM orders WHERE user_id = $1 AND status = 'PROCESSED')
+    - (SELECT COALESCE(SUM(sum), 0) FROM withdrawals WHERE user_id = $1),
     (SELECT COALESCE(SUM(sum), 0) FROM withdrawals WHERE user_id = $1)
 ```
 
 Всегда возвращает ровно одну строку (COALESCE гарантирует 0 при отсутствии данных).
 
-#### CreateWithdrawal (в транзакции с advisory lock)
+#### CreateWithdrawal (в транзакции с блокировкой строки пользователя)
 
 ```sql
 BEGIN;
--- Advisory lock по userID для предотвращения race condition
+-- Блокировка строки пользователя для предотвращения race condition
 -- при параллельных списаниях: вторая транзакция дождётся завершения первой
--- Снимается автоматически при COMMIT/ROLLBACK, не требует реальной строки
-SELECT pg_advisory_xact_lock($1);
+SELECT id FROM users WHERE id = $1 FOR UPDATE;
 -- Проверить баланс
 SELECT
     (SELECT COALESCE(SUM(accrual), 0) FROM orders WHERE user_id = $1 AND status = 'PROCESSED')
@@ -663,7 +663,7 @@ COMMIT;
 
 При недостатке средств → `ErrInsufficientFunds`.
 
-**Почему advisory lock**: в `READ COMMITTED` (default) параллельные транзакции не видят незакоммиченные изменения друг друга — два tx могут одновременно увидеть `available=700` и оба разрешить списание. `pg_advisory_xact_lock` сериализует списания для одного пользователя: вторая транзакция ждёт, пока первая не завершится. Лок автоматически снимается при COMMIT/ROLLBACK и не требует реальной строки в таблице.
+**Почему блокировка строки**: в `READ COMMITTED` (default) параллельные транзакции не видят незакоммиченные изменения друг друга — два tx могут одновременно увидеть `available=700` и оба разрешить списание. `SELECT ... FOR UPDATE` по строке пользователя в `users` сериализует списания для одного пользователя: вторая транзакция ждёт, пока первая не завершится (COMMIT/ROLLBACK снимает блокировку).
 
 ---
 

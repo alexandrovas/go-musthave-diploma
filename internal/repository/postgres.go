@@ -236,11 +236,12 @@ func (s *PostgresStorage) CreateWithdrawal(ctx context.Context, userID int64, or
 			}
 			defer tx.Rollback()
 
-			// Advisory lock для предотвращения race condition
+			// Блокировка строки пользователя для предотвращения race condition
 			// при параллельных списаниях одного пользователя
-			const lockQ = `SELECT pg_advisory_xact_lock($1)`
-			if _, err := tx.ExecContext(ctx, lockQ, userID); err != nil {
-				return fmt.Errorf("acquire advisory lock: %w", err)
+			var lockedUserID int64
+			const lockQ = `SELECT id FROM users WHERE id = $1 FOR UPDATE`
+			if err := tx.QueryRowContext(ctx, lockQ, userID).Scan(&lockedUserID); err != nil {
+				return fmt.Errorf("lock user row: %w", err)
 			}
 
 			// Проверка доступного баланса в рамках транзакции
