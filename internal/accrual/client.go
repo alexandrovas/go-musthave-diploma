@@ -6,9 +6,12 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"strconv"
 	"time"
+
+	"github.com/alexandrovas/go-musthave-diploma/internal/retry"
 )
 
 // Response представляет ответ от accrual-сервиса
@@ -25,6 +28,16 @@ type TooManyRequestsError struct {
 
 func (e TooManyRequestsError) Error() string {
 	return fmt.Sprintf("too many requests, retry after %s", e.RetryAfter)
+}
+
+// ServerError представляет ошибку 5xx от accrual-сервиса — временную проблему
+// на стороне сервиса (перегрузка, недоступность), которую имеет смысл повторить
+type ServerError struct {
+	StatusCode int
+}
+
+func (e ServerError) Error() string {
+	return fmt.Sprintf("accrual server error: status %d", e.StatusCode)
 }
 
 var (
@@ -50,40 +63,70 @@ func NewClient(baseURL string, logger *slog.Logger) *Client {
 	}
 }
 
-// GetOrderAccrual запрашивает информацию о начислении для заказа из accrual-сервиса
+// GetOrderAccrual запрашивает информацию о начислении для заказа из accrual-сервиса.
+// Запрос оборачивается в retry.Do: временные сбои сервиса (5xx) и сетевые ошибки
+// повторяются автоматически, чтобы не терять заказ из-за кратковременной недоступности
 func (c *Client) GetOrderAccrual(ctx context.Context, orderNumber string) (*Response, error) {
 	url := fmt.Sprintf("%s/api/orders/%s", c.baseURL, orderNumber)
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return nil, fmt.Errorf("creating request: %w", err)
-	}
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("executing request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	switch resp.StatusCode {
-	case http.StatusOK:
-		var accrualResp Response
-		if err := json.NewDecoder(resp.Body).Decode(&accrualResp); err != nil {
-			return nil, fmt.Errorf("decoding response: %w", err)
-		}
-		return &accrualResp, nil
-
-	case http.StatusNoContent:
-		return nil, ErrOrderNotRegistered
-
-	case http.StatusTooManyRequests:
-		return nil, TooManyRequestsError{
-			RetryAfter: c.getRetryAfter(resp),
+	var result *Response
+	err := retry.Do(ctx, isRetriableAccrualError, retry.Intervals, func() error {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+		if err != nil {
+			return fmt.Errorf("creating request: %w", err)
 		}
 
-	default:
-		return nil, fmt.Errorf("unexpected status code from accrual: %d", resp.StatusCode)
+		resp, err := c.httpClient.Do(req)
+		if err != nil {
+			return fmt.Errorf("executing request: %w", err)
+		}
+		defer resp.Body.Close()
+
+		switch {
+		case resp.StatusCode == http.StatusOK:
+			var accrualResp Response
+			if err := json.NewDecoder(resp.Body).Decode(&accrualResp); err != nil {
+				return fmt.Errorf("decoding response: %w", err)
+			}
+			result = &accrualResp
+			return nil
+
+		case resp.StatusCode == http.StatusNoContent:
+			return ErrOrderNotRegistered
+
+		case resp.StatusCode == http.StatusTooManyRequests:
+			return TooManyRequestsError{
+				RetryAfter: c.getRetryAfter(resp),
+			}
+
+		case resp.StatusCode >= http.StatusInternalServerError:
+			return ServerError{StatusCode: resp.StatusCode}
+
+		default:
+			return fmt.Errorf("unexpected status code from accrual: %d", resp.StatusCode)
+		}
+	})
+	if err != nil {
+		return nil, err
 	}
+	return result, nil
+}
+
+// isRetriableAccrualError сообщает, стоит ли повторить запрос к accrual-сервису.
+// Retriable: 5xx-ответы сервиса (временная перегрузка/недоступность) и сетевые
+// ошибки (обрыв соединения, таймаут). 429 сюда не входит — его обрабатывает
+// вызывающий код отдельно, ориентируясь на заголовок Retry-After
+func isRetriableAccrualError(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	if _, ok := errors.AsType[ServerError](err); ok {
+		return true
+	}
+
+	_, ok := errors.AsType[net.Error](err)
+	return ok
 }
 
 // getRetryAfter вычисляет time.Duration из заголовка Retry-After.

@@ -519,17 +519,23 @@ type Response struct {
 type TooManyRequestsError struct {
     RetryAfter time.Duration
 }
+
+type ServerError struct {
+    StatusCode int
+}
 ```
 
 Метод: `GetOrderAccrual(ctx context.Context, orderNumber string) (*Response, error)`
 
 - Выполняет `GET {baseURL}/api/orders/{number}`.
 - HTTP-клиент с таймаутом 10с.
+- Запрос обёрнут в `retry.Do` с `isRetriableAccrualError` (5xx-ответы сервиса + `net.Error`) и стандартными интервалами `retry.Intervals` — временные сбои accrual-сервиса не приводят к потере заказа до следующего тика воркера.
 - Обрабатывает коды ответа:
   - `200` — десериализовать JSON, вернуть результат.
   - `204` — заказ не зарегистрирован в accrual → вернуть `ErrOrderNotRegistered`.
-  - `429` — прочитать `Retry-After` заголовок (по умолчанию 60с), вернуть `TooManyRequestsError`.
-  - остальные — вернуть ошибку с кодом статуса.
+  - `429` — прочитать `Retry-After` заголовок (по умолчанию 60с), вернуть `TooManyRequestsError` (не retriable — обрабатывается вызывающим кодом отдельно).
+  - `5xx` — вернуть `ServerError` (retriable).
+  - остальные — вернуть ошибку с кодом статуса (не retriable).
 
 ### Фоновый воркер обработки заказов
 
