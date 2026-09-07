@@ -129,6 +129,10 @@ func (a *App) processOrders(ctx context.Context, repo *repository.PostgresStorag
 					a.logger.Warn("accrual rate limit hit", "retry_after", retryAfter)
 					break // прервать итерацию
 				}
+				if errors.Is(err, accrual.ErrOrderNotRegistered) {
+					a.logger.Debug("order not yet registered in accrual", "order", order.Number)
+					continue
+				}
 				a.logger.Error("accrual request failed", "order", order.Number, "error", err)
 				continue
 			}

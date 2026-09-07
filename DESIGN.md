@@ -547,7 +547,7 @@ type ServerError struct {
 2. Для каждого заказа:
    a. Запросить accrual-клиент: `accrualClient.GetOrderAccrual(ctx, order.Number)`.
    b. При `TooManyRequestsError` — выдержать паузу из `RetryAfter` и прервать текущую итерацию.
-   c. При `ErrOrderNotRegistered` (204) — пропустить, статус остаётся `NEW`.
+   c. При `ErrOrderNotRegistered` (204) — пропустить, статус остаётся `NEW`; штатная ситуация, логируется на уровне Debug (не Error), чтобы не засорять лог.
    d. Маппинг статусов accrual → gophermart:
       - `REGISTERED` → `NEW` (оставляем как есть)
       - `PROCESSING` → `PROCESSING`
@@ -762,9 +762,13 @@ func (a *App) processOrders(ctx context.Context, repo *repository.PostgresStorag
         for _, order := range orders {
             resp, err := client.GetOrderAccrual(ctx, order.Number)
             if err != nil {
-                if tooManyReq, ok := errors.AsType[*accrual.TooManyRequestsError](err); ok {
+                if tooManyReq, ok := errors.AsType[accrual.TooManyRequestsError](err); ok {
                     retryAfter = tooManyReq.RetryAfter
                     break // прервать итерацию
+                }
+                if errors.Is(err, accrual.ErrOrderNotRegistered) {
+                    // штатная ситуация: заказ ещё не принят accrual в обработку
+                    continue
                 }
                 continue
             }
