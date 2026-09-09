@@ -142,9 +142,10 @@ func (c *Client) getRetryAfter(resp *http.Response) time.Duration {
 		if seconds, err := strconv.Atoi(val); err == nil && seconds > 0 {
 			return time.Duration(seconds) * time.Second
 		}
+
+		c.logger.Warn("wrong value in response header, use fallback value",
+			"header", headerName, "fallback", fallback, "value", val)
 	}
 
-	msg := fmt.Sprintf("wrong value in response header %s, use default value %s as fallback", headerName, fallback)
-	c.logger.Warn(msg, "value", val)
 	return fallback
 }
