@@ -138,7 +138,7 @@ func cmd() *cobra.Command {
     cmd.PersistentFlags().StringP("run_address", "a", "localhost:8080", "server listen address")
     cmd.PersistentFlags().StringP("database_uri", "d", "", "database connection URI")
     cmd.PersistentFlags().StringP("accrual_system_address", "r", "", "accrual system address")
-    cmd.PersistentFlags().StringP("jwt_secret", "s", "", "JWT signing secret")
+    cmd.PersistentFlags().StringP("jwt_secret", "s", "gophermart-secret-key", "JWT signing secret")
     cmd.PersistentFlags().StringP("log.level", "l", "info", "log level (debug, info, warn, error)")
     cmd.PersistentFlags().StringP("log.format", "f", "text", "log format (text, json)")
     return cmd
