@@ -81,10 +81,8 @@ func LoadConfig(configPath string, flags *pflag.FlagSet) (*Config, error) {
 	if cfg.AccrualSystemAddress == "" {
 		return nil, fmt.Errorf("accrual system address is required (ACCRUAL_SYSTEM_ADDRESS or -r)")
 	}
-
-	// Значение по умолчанию для JWT-секрета
 	if cfg.JWTSecret == "" {
-		cfg.JWTSecret = "gophermart-secret-key"
+		return nil, fmt.Errorf("jwt secret is required (JWT_SECRET or -s)")
 	}
 
 	return &cfg, nil

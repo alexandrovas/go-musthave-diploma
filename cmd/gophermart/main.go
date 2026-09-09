@@ -7,8 +7,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	cmdHelper "github.com/alexandrovas/go-musthave-diploma/internal/cmd/gophermart/helper"
 	"github.com/alexandrovas/go-musthave-diploma/internal/cmd/gophermart"
+	cmdHelper "github.com/alexandrovas/go-musthave-diploma/internal/cmd/gophermart/helper"
 	"github.com/alexandrovas/go-musthave-diploma/internal/config"
 )
 
