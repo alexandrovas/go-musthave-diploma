@@ -50,6 +50,14 @@ jobs:
           (cd cmd/gophermart && go build -buildvcs=false -o gophermart)
           (cd cmd/accrual && chmod +x accrual_linux_amd64)
 
+      # NOTE: В тестах в репозитории Yandex-Practicum/go-autotests
+      # не формируется JWT secret, поэтому генерируем его здесь
+      # и пробрасываем через GITHUB_ENV в следующий шаг
+      - name: Generate JWT secret
+        run: |
+          # random alphanumeric string (12 characters)
+          echo "JWT_SECRET=$(head /dev/urandom | tr -dc A-Za-z0-9 | head -c 12)" >> $GITHUB_ENV
+
       - name: Test
         run: |
           gophermarttest \

@@ -1,0 +1,65 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: gophermart-postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: gophermart
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  postgres-accrual:
+    image: postgres:16-alpine
+    container_name: accrual-postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: accrual
+    ports:
+      - "5433:5432"
+    volumes:
+      - pgdata-accrual:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  accrual:
+    build:
+      context: ./cmd/accrual
+      dockerfile: Dockerfile
+    platform: linux/amd64
+    container_name: accrual
+    depends_on:
+      postgres-accrual:
+        condition: service_healthy
+    environment:
+      RUN_ADDRESS: ":8080"
+      DATABASE_URI: "postgres://postgres:postgres@postgres-accrual:5432/accrual?sslmode=disable"
+    ports:
+      - "8080:8080"
+
+  accrual-init:
+    image: alpine:3.20
+    container_name: accrual-init
+    depends_on:
+      accrual:
+        condition: service_started
+    environment:
+      ACCRUAL_URL: "http://accrual:8080"
+    volumes:
+      - ./scripts/accrual-init.sh:/accrual-init.sh:ro
+    entrypoint: ["sh", "/accrual-init.sh"]
+
+volumes:
+  pgdata:
+  pgdata-accrual:
